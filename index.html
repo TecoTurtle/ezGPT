@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ezGPT</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+        /* light mode (default) */
+        body {
+            margin: 0; padding: 1rem;
+            font-family: sans-serif;
+            box-sizing: border-box;
+            max-width: 100%;
+            background: #fafafa;
+            color: #222;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        h1 {
+            font-size: 2rem;
+            margin: 1rem 0 0.5rem 0;
+        }
+        h2 {
+            font-size: 1.5rem;
+            margin: 1rem 0 0.5rem 0;
+            text-align: center;
+        }
+        h3 {
+            font-size: 1.25rem;
+            margin: 1rem 0 0.5rem 0;
+        }
+        input[type="text"], button {
+            width: 100%;
+            padding: 0.75rem;
+            margin-top: 0.5rem;
+            font-size: 1rem;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+        }
+        button {
+            margin-bottom: 1rem;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #statusLog {
+            text-align: center;
+            font-style: italic;
+            margin-bottom: 1rem;
+            color: #666;
+            transition: color 0.3s;
+        }
+        #chatOutput {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f5f5f5;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            display: block;
+            font-size: 1rem;
+            line-height: 1.4;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        code {
+            background:#eee; 
+            padding:2px 4px; 
+            border-radius:3px; 
+            font-family: monospace;
+        }
+        pre {
+            background:#222; 
+            color:#eee; 
+            padding:10px; 
+            border-radius:5px; 
+            overflow:auto; 
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .user-label {
+            font-weight: 700;
+            color: #007bff;
+            transition: color 0.3s;
+        }
+        .ai-label {
+            font-weight: 700;
+            color: #28a745;
+            transition: color 0.3s;
+        }
+
+        /* dark mode styles */
+        body.dark-mode {
+            background: #121212;
+            color: #e0e0e0;
+        }
+        body.dark-mode input[type="text"], 
+        body.dark-mode button {
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+        body.dark-mode button {
+            background-color: #0d6efd;
+            color: white;
+        }
+        body.dark-mode button:hover {
+            background-color: #0a58ca;
+        }
+        body.dark-mode #statusLog {
+            color: #bbb;
+        }
+        body.dark-mode #chatOutput {
+            background: #222;
+            color: #ddd;
+        }
+        body.dark-mode code {
+            background:#333;
+            color: #eee;
+        }
+        body.dark-mode pre {
+            background:#111;
+            color:#eee;
+        }
+        body.dark-mode .user-label {
+            color: #4dabf7;
+        }
+        body.dark-mode .ai-label {
+            color: #71db71;
+        }
+
+        /* dark mode toggle button */
+        #darkModeToggle {
+            margin-bottom: 1rem;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            border-radius: 4px;
+            border: none;
+            background-color: #444;
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        #darkModeToggle:hover {
+            background-color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h2>ezGPT</h2>
+
+    <button id="darkModeToggle">toggle dark mode</button>
+
+    <input type="text" id="userInput" placeholder="enter your message here">
+    <button onclick="handleUserInput()">send</button>
+
+    <div id="statusLog"></div>
+    <div id="chatOutput"></div>
+
+    <script src="https://js.puter.com/v2/"></script>
+    <script>
+        // keep track of all messages for conversation context
+        const conversationHistory = [];
+
+        // parse markdown-like formatting, support headers too
+        function parseformatting(text) {
+            // escape html special chars first to avoid injection
+            text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+            // markdown headers: h3, h2, h1 in order
+            text = text.replace(/^### (.*)$/gm, '<h3>$1</h3>');
+            text = text.replace(/^## (.*)$/gm, '<h2>$1</h2>');
+            text = text.replace(/^# (.*)$/gm, '<h1>$1</h1>');
+
+            // code blocks with triple backticks (multiline)
+            text = text.replace(/```([\s\S]*?)```/g, (match, p1) => {
+                return `<pre>${p1}</pre>`;
+            });
+
+            // inline code with single backticks
+            text = text.replace(/`([^`\n]+)`/g, (match, p1) => {
+                return `<code>${p1}</code>`;
+            });
+
+            // bold with **
+            text = text.replace(/\*\*([^*]+)\*\*/g, (match, p1) => {
+                return `<strong>${p1}</strong>`;
+            });
+
+            // italic with *
+            text = text.replace(/\*([^*]+)\*/g, (match, p1) => {
+                // skip if looks like bold with double *
+                if (p1.startsWith("*") && p1.endsWith("*")) return match;
+                return `<em>${p1}</em>`;
+            });
+
+            // convert newlines to <br> for line breaks
+            text = text.replace(/\n/g, "<br>");
+
+            return text;
+        }
+
+        async function handleUserInput() {
+            const inputEl = document.getElementById('userInput');
+            const userText = inputEl.value.trim();
+            const statusLog = document.getElementById('statusLog');
+            const chatOutput = document.getElementById('chatOutput');
+
+            if (!userText) {
+                statusLog.innerText = "please enter some text.";
+                return;
+            }
+
+            statusLog.innerText = "processing...";
+
+            // add user message to conversation history
+            conversationHistory.push({ role: "user", content: userText });
+
+            try {
+                // send entire conversation history for context
+                const responseObj = await puter.ai.chat(conversationHistory);
+
+                let chatbotResponse = responseObj?.message?.content;
+
+                if (!chatbotResponse || typeof chatbotResponse !== "string") {
+                    throw new Error("invalid response from chatbot");
+                }
+
+                // add ai response to conversation history
+                conversationHistory.push({ role: "assistant", content: chatbotResponse });
+
+                // format ai response with markdown-style formatting
+                const formattedResponse = parseformatting(chatbotResponse);
+
+                chatOutput.innerHTML +=
+                    `<div class="chat-message"><span class="user-label">you:</span> ${parseformatting(userText)}</div>` +
+                    `<div class="chat-message"><span class="ai-label">ai:</span> ${formattedResponse}</div><br>`;
+
+                chatOutput.scrollTop = chatOutput.scrollHeight;
+
+                statusLog.innerText = "chatbot response generated";
+            } catch (err) {
+                console.error("error:", err);
+                statusLog.innerText = "error: " + (err.message || "something went wrong");
+                // on error, remove last user message to keep history clean
+                conversationHistory.pop();
+            }
+
+            inputEl.value = "";
+            inputEl.focus();
+        }
+
+        // dark mode toggle logic
+        const darkModeToggle = document.getElementById('darkModeToggle');
+
+        // apply dark mode based on preference or saved setting
+        function applyDarkMode(isDark) {
+            if (isDark) {
+                document.body.classList.add('dark-mode');
+                darkModeToggle.innerText = "switch to light mode";
+            } else {
+                document.body.classList.remove('dark-mode');
+                darkModeToggle.innerText = "switch to dark mode";
+            }
+        }
+
+        // check saved user preference, or device preference if none saved
+        function initializeDarkMode() {
+            const saved = localStorage.getItem('ezgpt-dark-mode');
+            if (saved === 'dark') {
+                applyDarkMode(true);
+            } else if (saved === 'light') {
+                applyDarkMode(false);
+            } else {
+                // fallback to system preference
+                const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                applyDarkMode(prefersDark);
+            }
+        }
+
+        // toggle dark mode and save preference
+        darkModeToggle.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark-mode');
+            applyDarkMode(isDark);
+            localStorage.setItem('ezgpt-dark-mode', isDark ? 'dark' : 'light');
+        });
+
+        initializeDarkMode();
+    </script>
+</body>
+</html>
